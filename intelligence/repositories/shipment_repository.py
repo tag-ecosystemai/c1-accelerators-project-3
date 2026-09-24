@@ -43,6 +43,14 @@ class ShipmentRepository:
 
         row = rows.iloc[0]
 
+        product_categories = (
+            rows["Category Name"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+
         shipping_date = pd.to_datetime(
             row["shipping date (DateOrders)"],
             errors="coerce",
@@ -55,6 +63,7 @@ class ShipmentRepository:
             destination_country=str(row["Order Country"]),
             order_region=str(row["Order Region"]),
             shipping_mode=str(row["Shipping Mode"]),
+            product_categories=product_categories,
             order_date=pd.to_datetime(
                 row["order date (DateOrders)"]
             ).to_pydatetime(),

@@ -25,6 +25,8 @@ class Shipment(BaseModel):
     order_region: str
 
     shipping_mode: str
+    product_categories: list[str]
+
     order_date: datetime
     scheduled_shipping_days: int
     shipping_date: datetime | None = None
