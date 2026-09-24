@@ -19,9 +19,13 @@ def test_find_alternative_routes():
     routes = tools.find_alternative_route("77202")
 
     assert len(routes) == 1
-    assert routes[0].route_id == "ROUTE-001"
-    assert routes[0].route_name == "Southeast Asia Standard Route"
-    assert routes[0].demo_reliability_score == 0.88
+
+    alternative = routes[0]
+
+    assert alternative.route_id == "ROUTE-002"
+    assert alternative.route_name == "Southeast Asia Express Route"
+    assert alternative.demo_reliability_score == 0.93
+    assert "Standard Class" not in alternative.shipping_modes
 
 
 def test_missing_shipment_returns_no_routes():

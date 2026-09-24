@@ -39,9 +39,8 @@ class RouteRepository:
         country: str,
         region: str,
         shipping_mode: str,
-        exclude_route_id: str | None = None,
     ) -> list[RouteAlternative]:
-        """Find route alternatives matching shipment requirements."""
+        """Find alternative routes using a different shipping mode."""
 
         routes = self._load_routes()
 
@@ -50,8 +49,7 @@ class RouteRepository:
             for route in routes
             if country in route.destination_countries
             and region == route.region
-            and shipping_mode in route.shipping_modes
-            and route.route_id != exclude_route_id
+            and shipping_mode not in route.shipping_modes
         ]
 
         return sorted(
