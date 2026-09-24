@@ -33,6 +33,8 @@ data/raw/*
 data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+!data/processed/routes.json
+!data/processed/suppliers.json
 
 # IDE / OS
 .vscode/
