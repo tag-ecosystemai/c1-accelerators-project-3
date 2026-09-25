@@ -1,0 +1,31 @@
+{
+  "model_name": "SentinelAI CatBoost Risk Model",
+  "model_type": "CatBoostClassifier",
+  "target": "Late_delivery_risk",
+  "threshold": 0.39,
+  "features": [
+    "scheduled_days",
+    "market",
+    "order_region",
+    "order_country",
+    "item_count",
+    "total_quantity",
+    "avg_product_price",
+    "total_sales",
+    "avg_discount_rate",
+    "customer_segment"
+  ],
+  "validation": {
+    "precision": 0.6761,
+    "recall": 0.6898,
+    "f1": 0.6829,
+    "pr_auc": 0.7904
+  },
+  "test": {
+    "precision": 0.6533,
+    "recall": 0.743,
+    "f1": 0.6952,
+    "roc_auc": 0.7316,
+    "pr_auc": 0.7989
+  }
+}
