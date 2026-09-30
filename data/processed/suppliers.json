@@ -1,0 +1,42 @@
+[
+  {
+    "supplier_id": "SUP-001",
+    "supplier_name": "Nexa Electronics Supply",
+    "region": "Southeast Asia",
+    "countries_served": ["Indonesia", "Malaysia", "Singapore"],
+    "product_categories": ["Electronics", "Computers"],
+    "reliability_score": 0.91
+  },
+  {
+    "supplier_id": "SUP-002",
+    "supplier_name": "Global Home Goods",
+    "region": "Southeast Asia",
+    "countries_served": ["Indonesia", "Malaysia", "Thailand"],
+    "product_categories": ["Home", "Furniture"],
+    "reliability_score": 0.87
+  },
+  {
+    "supplier_id": "SUP-003",
+    "supplier_name": "Apex Consumer Supply",
+    "region": "South Asia",
+    "countries_served": ["India", "Bangladesh", "Sri Lanka"],
+    "product_categories": ["Consumer", "Electronics"],
+    "reliability_score": 0.89
+  },
+  {
+    "supplier_id": "SUP-004",
+    "supplier_name": "Continental Essentials",
+    "region": "Western Europe",
+    "countries_served": ["France", "Germany", "Spain"],
+    "product_categories": ["Home", "Consumer"],
+    "reliability_score": 0.86
+  },
+  {
+    "supplier_id": "SUP-005",
+    "supplier_name": "Pacific General Supply",
+    "region": "Oceania",
+    "countries_served": ["Australia", "New Zealand"],
+    "product_categories": ["Consumer", "Home"],
+    "reliability_score": 0.88
+  }
+]

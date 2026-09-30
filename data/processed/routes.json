@@ -1,0 +1,83 @@
+[
+  {
+    "route_id": "ROUTE-001",
+    "route_name": "Southeast Asia Standard Route",
+    "region": "Southeast Asia",
+    "destination_countries": [
+      "Indonesia",
+      "Malaysia",
+      "Singapore",
+      "Thailand"
+    ],
+    "shipping_modes": [
+      "Standard Class",
+      "Second Class"
+    ],
+    "estimated_transit_days": 4,
+    "demo_reliability_score": 0.88
+  },
+  {
+    "route_id": "ROUTE-002",
+    "route_name": "Southeast Asia Express Route",
+    "region": "Southeast Asia",
+    "destination_countries": [
+      "Indonesia",
+      "Malaysia",
+      "Singapore",
+      "Thailand"
+    ],
+    "shipping_modes": [
+      "First Class",
+      "Same Day"
+    ],
+    "estimated_transit_days": 2,
+    "demo_reliability_score": 0.93
+  },
+  {
+    "route_id": "ROUTE-003",
+    "route_name": "South Asia Standard Route",
+    "region": "South Asia",
+    "destination_countries": [
+      "India",
+      "Bangladesh",
+      "Sri Lanka"
+    ],
+    "shipping_modes": [
+      "Standard Class",
+      "Second Class"
+    ],
+    "estimated_transit_days": 5,
+    "demo_reliability_score": 0.86
+  },
+  {
+    "route_id": "ROUTE-004",
+    "route_name": "Western Europe Priority Route",
+    "region": "Western Europe",
+    "destination_countries": [
+      "France",
+      "Germany",
+      "Spain"
+    ],
+    "shipping_modes": [
+      "First Class",
+      "Standard Class"
+    ],
+    "estimated_transit_days": 3,
+    "demo_reliability_score": 0.91
+  },
+  {
+    "route_id": "ROUTE-005",
+    "route_name": "Oceania Standard Route",
+    "region": "Oceania",
+    "destination_countries": [
+      "Australia",
+      "New Zealand"
+    ],
+    "shipping_modes": [
+      "Standard Class",
+      "Second Class"
+    ],
+    "estimated_transit_days": 6,
+    "demo_reliability_score": 0.84
+  }
+]
