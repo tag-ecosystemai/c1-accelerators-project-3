@@ -40,8 +40,8 @@ import './styles.css';
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL !== undefined
     ? import.meta.env.VITE_API_BASE_URL.replace(/\/$/, '')
-    : 'http://127.0.0.1:8000';
-
+    : '';
+    
 const DEFAULT_SHIPMENT_ID = '77202';
 
 const nav = [

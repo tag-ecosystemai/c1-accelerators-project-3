@@ -10,25 +10,24 @@ from intelligence.schemas.risk_features import RiskFeatures
 DATA_PATH = (
     Path(__file__).resolve().parents[2]
     / "data"
-    / "raw"
-    / "DataCoSupplyChainDataset.csv"
+    / "processed"
+    / "shipment_features.csv"
 )
 
 
 class RiskFeatureRepository:
-    """Repository for reconstructing model-ready shipment features."""
+    """Repository for accessing model-ready shipment features."""
 
     def __init__(self, data_path: Path = DATA_PATH) -> None:
         self.data_path = data_path
         self._data: pd.DataFrame | None = None
 
     def _load_data(self) -> pd.DataFrame:
-        """Load the raw shipment dataset lazily."""
+        """Load processed shipment features lazily."""
 
         if self._data is None:
             self._data = pd.read_csv(
                 self.data_path,
-                encoding="latin1",
             )
 
         return self._data
@@ -37,40 +36,38 @@ class RiskFeatureRepository:
         self,
         shipment_id: str,
     ) -> RiskFeatures | None:
-        """Build model-ready features for an order."""
+        """Return model-ready features for an order."""
 
         data = self._load_data()
 
         rows = data[
-            data["Order Id"].astype(str) == shipment_id
+            data["shipment_id"].astype(str) == shipment_id
         ]
 
         if rows.empty:
             return None
 
-        first_row = rows.iloc[0]
+        row = rows.iloc[0]
 
         return RiskFeatures(
             scheduled_days=int(
-                first_row["Days for shipment (scheduled)"]
+                row["scheduled_shipping_days"]
             ),
-            market=str(first_row["Market"]),
-            order_region=str(first_row["Order Region"]),
-            order_country=str(first_row["Order Country"]),
-            item_count=len(rows),
-            total_quantity=int(
-                rows["Order Item Quantity"].sum()
-            ),
+            market=str(row["market"]),
+            order_region=str(row["order_region"]),
+            order_country=str(row["destination_country"]),
+            item_count=int(row["item_count"]),
+            total_quantity=int(row["total_quantity"]),
             avg_product_price=float(
-                rows["Product Price"].mean()
+                row["avg_product_price"]
             ),
             total_sales=float(
-                rows["Sales"].sum()
+                row["total_sales"]
             ),
             avg_discount_rate=float(
-                rows["Order Item Discount Rate"].mean()
+                row["avg_discount_rate"]
             ),
             customer_segment=str(
-                first_row["Customer Segment"]
+                row["customer_segment"]
             ),
         )

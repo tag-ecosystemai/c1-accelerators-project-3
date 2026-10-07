@@ -7,6 +7,10 @@ COPY frontend/package*.json ./
 RUN npm ci
 
 COPY frontend/ ./
+
+# Production frontend is served by the same FastAPI container.
+ENV VITE_API_BASE_URL=""
+
 RUN npm run build
 
 
@@ -34,7 +38,6 @@ COPY backend/ ./backend/
 COPY intelligence/ ./intelligence/
 COPY data/knowledge/ ./data/knowledge/
 COPY data/processed/ ./data/processed/
-COPY intelligence/models/ ./intelligence/models/
 
 # React production build
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
