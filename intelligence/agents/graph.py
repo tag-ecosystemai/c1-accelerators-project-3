@@ -5,10 +5,13 @@ from typing import Literal
 from langgraph.graph import END, START, StateGraph
 
 from intelligence.agents.state import AgentState
-from intelligence.repositories.risk_feature_repository import RiskFeatureRepository
+from intelligence.repositories.risk_feature_repository import (
+    RiskFeatureRepository,
+)
 from intelligence.services.investigation_service import InvestigationService
-from intelligence.services.risk_service import RiskService
 from intelligence.services.knowledge_service import KnowledgeService
+from intelligence.services.llm_service import LLMService
+from intelligence.services.risk_service import RiskService
 
 
 def assess_risk(
@@ -45,7 +48,7 @@ def assess_risk(
 def route_by_risk(
     state: AgentState,
 ) -> Literal["investigate", "finish"]:
-    """Route the investigation based on shipment risk."""
+    """Route the workflow based on the model's risk assessment."""
     risk = state.get("risk_assessment")
 
     if not risk:
@@ -73,25 +76,23 @@ def investigate(
 
     state["shipment"] = result["shipment"]
     state["route_context"] = result["route_context"]
-    state["route_options"] = result["route_options"]#
+    state["route_options"] = result["route_options"]
     state["supplier_options"] = result["supplier_options"]
 
-    if result["weather"] is not None:
+    if result.get("weather") is not None:
         state["weather"] = result["weather"]
 
+    if result.get("news") is not None:
+        state["news"] = result["news"]
+
     return state
 
-
-def finish(state: AgentState) -> AgentState:
-    """Finish the investigation workflow."""
-    return state
 
 def retrieve_knowledge(
     state: AgentState,
     knowledge_service: KnowledgeService,
 ) -> AgentState:
-    """Retrieve relevant operational procedures for the investigation."""
-
+    """Retrieve relevant operational procedures."""
     shipment_id = state.get("shipment_id")
 
     if not shipment_id:
@@ -108,8 +109,9 @@ def retrieve_knowledge(
 
     query = (
         f"Shipment {shipment_id} has elevated late-delivery risk. "
-        "What operational procedures apply to investigating the disruption, "
-        "evaluating mitigation options, and escalating potential inventory risk?"
+        "What operational procedures apply to investigating the "
+        "disruption, evaluating mitigation options, and escalating "
+        "potential inventory risk?"
     )
 
     results = knowledge_service.retrieve_procedures(
@@ -122,13 +124,106 @@ def retrieve_knowledge(
     return state
 
 
+def generate_briefing(
+    state: AgentState,
+    llm_service: LLMService,
+) -> AgentState:
+    """Generate an evidence-grounded operational briefing."""
+    shipment = state.get("shipment")
+
+    if shipment is None:
+        raise ValueError(
+            "Shipment information is required before briefing generation."
+        )
+
+    risk_assessment = state.get("risk_assessment")
+
+    if risk_assessment is None:
+        raise ValueError(
+            "Risk assessment is required before briefing generation."
+        )
+
+    shipment_data = (
+        shipment.model_dump()
+        if hasattr(shipment, "model_dump")
+        else shipment
+    )
+
+    route_context = state.get("route_context")
+    route_context_data = (
+        route_context.model_dump()
+        if hasattr(route_context, "model_dump")
+        else route_context
+    )
+
+    weather = state.get("weather")
+    weather_data = (
+        weather.model_dump()
+        if hasattr(weather, "model_dump")
+        else weather
+    )
+
+    route_options = [
+        item.model_dump()
+        if hasattr(item, "model_dump")
+        else item
+        for item in state.get("route_options", [])
+    ]
+
+    supplier_options = [
+        item.model_dump()
+        if hasattr(item, "model_dump")
+        else item
+        for item in state.get("supplier_options", [])
+    ]
+
+    news = [
+        item.model_dump()
+        if hasattr(item, "model_dump")
+        else item
+        for item in state.get("news", [])
+    ]
+
+    knowledge_results = [
+        item.model_dump()
+        if hasattr(item, "model_dump")
+        else item
+        for item in state.get("knowledge_results", [])
+    ]
+
+    briefing = llm_service.generate_briefing(
+        shipment=shipment_data,
+        risk_assessment=risk_assessment,
+        weather=weather_data,
+        route_context=route_context_data,
+        route_options=route_options,
+        supplier_options=supplier_options,
+        news=news,
+        knowledge_results=knowledge_results,
+        investigation_findings=state.get(
+            "investigation_findings",
+            [],
+        ),
+    )
+
+    state["briefing"] = briefing
+
+    return state
+
+
+def finish(state: AgentState) -> AgentState:
+    """Finish the SentinelAI workflow."""
+    return state
+
+
 def build_graph(
     risk_feature_repository: RiskFeatureRepository | None = None,
     risk_service: RiskService | None = None,
     investigation_service: InvestigationService | None = None,
     knowledge_service: KnowledgeService | None = None,
+    llm_service: LLMService | None = None,
 ):
-    """Build the SentinelAI investigation graph."""
+    """Build and compile the SentinelAI investigation graph."""
 
     risk_feature_repository = (
         risk_feature_repository or RiskFeatureRepository()
@@ -143,6 +238,8 @@ def build_graph(
     knowledge_service = (
         knowledge_service or KnowledgeService()
     )
+
+    llm_service = llm_service or LLMService()
 
     graph = StateGraph(AgentState)
 
@@ -163,7 +260,6 @@ def build_graph(
         ),
     )
 
-    # 3.3 — ADD THIS NODE
     graph.add_node(
         "retrieve_knowledge",
         lambda state: retrieve_knowledge(
@@ -172,9 +268,20 @@ def build_graph(
         ),
     )
 
+    graph.add_node(
+        "generate_briefing",
+        lambda state: generate_briefing(
+            state,
+            llm_service,
+        ),
+    )
+
     graph.add_node("finish", finish)
 
-    graph.add_edge(START, "assess_risk")
+    graph.add_edge(
+        START,
+        "assess_risk",
+    )
 
     graph.add_conditional_edges(
         "assess_risk",
@@ -185,12 +292,24 @@ def build_graph(
         },
     )
 
-    # CHANGE THE EXISTING INVESTIGATE → FINISH EDGE
-    graph.add_edge("investigate", "retrieve_knowledge")
+    graph.add_edge(
+        "investigate",
+        "retrieve_knowledge",
+    )
 
-    # ADD THIS
-    graph.add_edge("retrieve_knowledge", "finish")
+    graph.add_edge(
+        "retrieve_knowledge",
+        "generate_briefing",
+    )
 
-    graph.add_edge("finish", END)
+    graph.add_edge(
+        "generate_briefing",
+        "finish",
+    )
+
+    graph.add_edge(
+        "finish",
+        END,
+    )
 
     return graph.compile()
