@@ -1,5 +1,5 @@
 import re
-
+import json
 from app.schemas.report import RiskReport
 
 CITATION = re.compile(r"\[(E\d+)\]")
@@ -49,7 +49,23 @@ def build_briefing(report: RiskReport) -> str:
             lines.append(f"  - {a.name}: {a.reason}")
     else:
         lines.append("  - No better option found in the data.")
+    
 
+    lines += ["", "Procedure guidance:"]
+    guidance = []
+    for e in report.evidence:
+        if e.source == "rag":
+            try:
+                passages = json.loads(e.detail).get("passages", [])
+            except ValueError:
+                passages = []
+            for p in passages:
+                text = " ".join(p["text"].lstrip("# ").split())
+                guidance.append(f"  - {text} [{e.id}, from {p['source']}]")
+    if guidance:
+        lines += guidance
+    else:
+        lines.append("  - No matching procedure found in the knowledge base.")
     lines += ["", "Data gaps:"]
     if report.signals_unavailable:
         lines.append(f"  - Failed to load: {', '.join(report.signals_unavailable)}")

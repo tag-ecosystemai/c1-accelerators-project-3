@@ -5,7 +5,7 @@ from app.ingestion.dataco import get_shipment
 from app.schemas.report import Alternative, RiskReport
 from app.services import tools
 from app.services.predictor import is_flagged, score_shipment
-
+from app.services.knowledge import search_knowledge
 # Placeholder thresholds for "severe" weather. Agree real values with your team.
 SEVERE_PRECIP_MM_H = 5.0
 SEVERE_WIND_KMH = 60.0
@@ -38,6 +38,12 @@ def investigate(shipment_id: str, as_of: Optional[datetime] = None) -> RiskRepor
 
     alts = tools.find_alternative_shipping(shipment.id)
     e_alts = tools.record_evidence(report, "supplier", "find_alternative_shipping", alts)
+    knowledge = search_knowledge(
+        "how much time is needed to reroute a shipment and when to notify the customer"
+    )
+    tools.record_evidence(report, "rag", "search_knowledge", knowledge)
+    if not knowledge["available"]:
+        tools.mark_unavailable(report, "knowledge")
 
     # 2. Work out the causes. Each one cites the evidence it rests on.
     causes = []
