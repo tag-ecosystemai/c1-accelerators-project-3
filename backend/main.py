@@ -10,6 +10,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from backend.database import init_db
+from backend.routes.shipments import router as shipment_router
+from backend.routes.knowledge import router as knowledge_router
+
 from intelligence.agents.graph import build_graph
 
 
@@ -35,6 +39,10 @@ app = FastAPI(
     description="Supply-chain disruption intelligence and decision-support API.",
     version="1.0.0",
 )
+
+init_db()
+app.include_router(shipment_router)
+app.include_router(knowledge_router)
 
 # Development support.
 # Production uses the same origin because FastAPI serves the React build.

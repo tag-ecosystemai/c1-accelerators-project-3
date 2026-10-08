@@ -1,5 +1,5 @@
 import Landing from './Landing.jsx';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   Activity,
@@ -18,6 +18,7 @@ import {
   CloudSun,
   Download,
   ExternalLink,
+  FileText,
   Filter,
   Globe2,
   Home,
@@ -32,6 +33,7 @@ import {
   ShieldCheck,
   Sparkles,
   Truck,
+  Upload,
   X,
   Zap,
 } from 'lucide-react';
@@ -41,43 +43,48 @@ const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL !== undefined
     ? import.meta.env.VITE_API_BASE_URL.replace(/\/$/, '')
     : '';
-    
-const DEFAULT_SHIPMENT_ID = '77202';
 
 const nav = [
   ['landing', 'Home', Home],
   ['overview', 'Overview', LayoutDashboard],
   ['shipments', 'Shipments', Truck],
+  ['knowledge', 'Knowledge Base', FileText],
   ['alerts', 'Alerts', Bell],
   ['suppliers', 'Suppliers', Box],
 ];
 
-function formatPercentage(value) {
-  if (typeof value !== 'number' || Number.isNaN(value)) {
-    return '—';
-  }
+const RISK_STATE_LABELS = {
+  at_risk: 'At risk',
+  monitoring: 'Monitoring',
+  on_track: 'On track',
+};
 
-  return `${Math.round(value * 100)}%`;
+function formatRiskState(state) {
+  return RISK_STATE_LABELS[state] || 'Monitoring';
 }
 
-function formatRiskStatus(probability, isAtRisk) {
-  if (isAtRisk) {
-    return probability >= 0.7 ? 'High risk' : 'At risk';
-  }
-
-  return probability >= 0.25 ? 'Monitor' : 'On track';
-}
-
-function riskTone(probability, isAtRisk) {
-  if (isAtRisk || probability >= 0.5) {
+function riskTone(state) {
+  if (state === 'at_risk') {
     return 'high';
   }
 
-  if (probability >= 0.3) {
+  if (state === 'monitoring') {
     return 'medium';
   }
 
   return 'low';
+}
+
+function riskWidth(state) {
+  if (state === 'at_risk') {
+    return 90;
+  }
+
+  if (state === 'monitoring') {
+    return 55;
+  }
+
+  return 20;
 }
 
 function getDestination(shipment) {
@@ -85,9 +92,7 @@ function getDestination(shipment) {
     return 'Unknown destination';
   }
 
-  return [shipment.destination_city, shipment.destination_country]
-    .filter(Boolean)
-    .join(', ');
+  return shipment.destination || 'Unknown destination';
 }
 
 function getRouteLabel(shipment) {
@@ -95,27 +100,30 @@ function getRouteLabel(shipment) {
     return 'Route unavailable';
   }
 
+  const origin = shipment.origin || 'Origin unavailable';
   const destination = getDestination(shipment);
 
-  if (destination === 'Unknown destination') {
-    return 'Destination unavailable';
-  }
-
-  return `→ ${destination}`;
+  return `${origin} → ${destination}`;
 }
 
 function getRiskEvidence(data) {
-  const findings = Array.isArray(data?.investigation_findings)
-    ? data.investigation_findings
+  const evidence = Array.isArray(data?.evidence)
+    ? data.evidence
     : [];
 
-  if (findings.length > 0) {
-    return findings[0];
+  const usefulEvidence = evidence.find(
+    (item) =>
+      item?.value !== null &&
+      item?.value !== undefined &&
+      String(item.value).trim() !== '',
+  );
+
+  if (usefulEvidence) {
+    return String(usefulEvidence.value);
   }
 
   if (data?.weather) {
     const weather = data.weather;
-
     const parts = [];
 
     if (typeof weather.temperature_c === 'number') {
@@ -123,11 +131,15 @@ function getRiskEvidence(data) {
     }
 
     if (typeof weather.precipitation_mm === 'number') {
-      parts.push(`${weather.precipitation_mm.toFixed(1)} mm precipitation`);
+      parts.push(
+        `${weather.precipitation_mm.toFixed(1)} mm precipitation`,
+      );
     }
 
     if (typeof weather.wind_speed_kmh === 'number') {
-      parts.push(`${weather.wind_speed_kmh.toFixed(0)} km/h wind`);
+      parts.push(
+        `${weather.wind_speed_kmh.toFixed(0)} km/h wind`,
+      );
     }
 
     if (parts.length > 0) {
@@ -135,39 +147,67 @@ function getRiskEvidence(data) {
     }
   }
 
-  if (data?.route_options?.length > 0) {
-    return `${data.route_options.length} alternative route option${
-      data.route_options.length === 1 ? '' : 's'
-    } identified`;
-  }
-
-  return 'No additional investigation findings available';
+  return 'No additional investigation evidence was returned.';
 }
 
 function getSignalStatus(data) {
   return {
     weather: Boolean(data?.weather),
-    news: Array.isArray(data?.news) && data.news.length > 0,
+    knowledge:
+      Array.isArray(data?.knowledge_results) &&
+      data.knowledge_results.length > 0,
     route:
-      Boolean(data?.route_context) ||
-      (Array.isArray(data?.route_options) && data.route_options.length > 0),
+      Array.isArray(data?.route_options) &&
+      data.route_options.length > 0,
     suppliers:
       Array.isArray(data?.supplier_options) &&
       data.supplier_options.length > 0,
   };
 }
 
+function normalizeShipment(shipment) {
+  const riskState = shipment?.risk_state || 'monitoring';
+
+  return {
+    id: shipment?.shipment_id || 'Unknown',
+    trackingNumber: shipment?.tracking_number || '—',
+    carrier: shipment?.carrier || 'Unknown carrier',
+    origin: shipment?.origin || 'Unknown origin',
+    destination: shipment?.destination || 'Unknown destination',
+    route: getRouteLabel(shipment),
+    estimatedArrival: shipment?.estimated_arrival || null,
+    status: shipment?.current_status || 'Unknown',
+    shippingMode: shipment?.shipping_mode || 'Unknown',
+
+    riskState,
+    riskStatus: formatRiskState(riskState),
+    riskTone: riskTone(riskState),
+    riskWidth: riskWidth(riskState),
+
+    signals: {
+      weather: false,
+      knowledge: false,
+      route: false,
+      suppliers: false,
+    },
+
+    routeOptions: [],
+    supplierOptions: [],
+    knowledgeResults: [],
+    evidence: [],
+
+    briefing: '',
+    reportId: null,
+
+    raw: shipment,
+  };
+}
+
 function normalizeAnalysis(data) {
   const shipment = data?.shipment || {};
-  const risk = data?.risk_assessment || {};
+  const risk = data?.risk || {};
 
-  const probability =
-    typeof risk.probability === 'number' ? risk.probability : 0;
-
-  const isAtRisk = Boolean(risk.is_at_risk);
-
-  const destination = getDestination(shipment);
-  const routeLabel = getRouteLabel(shipment);
+  const riskState = risk?.state || 'monitoring';
 
   const routeOptions = Array.isArray(data?.route_options)
     ? data.route_options
@@ -177,49 +217,44 @@ function normalizeAnalysis(data) {
     ? data.supplier_options
     : [];
 
-  const news = Array.isArray(data?.news) ? data.news : [];
-
   const knowledgeResults = Array.isArray(data?.knowledge_results)
     ? data.knowledge_results
+    : [];
+
+  const evidence = Array.isArray(data?.evidence)
+    ? data.evidence
     : [];
 
   const signals = getSignalStatus(data);
 
   return {
-    id: data?.shipment_id || shipment.shipment_id || DEFAULT_SHIPMENT_ID,
-    name:
-      shipment.product_categories ||
-      `Shipment ${data?.shipment_id || DEFAULT_SHIPMENT_ID}`,
-    route: routeLabel,
-    destination,
-    supplier: 'Supplier identity unavailable',
-    status: shipment.status || 'Unknown',
-    shippingMode: shipment.shipping_mode || 'Unknown',
-    orderRegion: shipment.order_region || 'Unknown',
-    orderDate: shipment.order_date || 'Unknown',
-    scheduledDays: shipment.scheduled_shipping_days ?? '—',
-    risk: Math.round(probability * 100),
-    probability,
-    threshold:
-      typeof risk.threshold === 'number' ? risk.threshold : null,
-    isAtRisk,
-    riskStatus: formatRiskStatus(probability, isAtRisk),
-    riskTone: riskTone(probability, isAtRisk),
+    id: shipment?.shipment_id || 'Unknown',
+    trackingNumber: shipment?.tracking_number || '—',
+    carrier: shipment?.carrier || 'Unknown carrier',
+    origin: shipment?.origin || 'Unknown origin',
+    destination:
+      shipment?.destination || 'Unknown destination',
+    route: getRouteLabel(shipment),
+    estimatedArrival: shipment?.estimated_arrival || null,
+    status: shipment?.current_status || 'Unknown',
+    shippingMode: shipment?.shipping_mode || 'Unknown',
+    riskState,
+    riskStatus: formatRiskState(riskState),
+    riskTone: riskTone(riskState),
+    riskWidth: riskWidth(riskState),
     reason: getRiskEvidence(data),
     evidenceSource:
-      signals.weather
-        ? 'Open-Meteo weather signal'
-        : signals.route
-          ? 'Route intelligence'
-          : signals.news
-            ? 'Regional news'
-            : 'SentinelAI investigation',
+      signals.knowledge
+        ? 'Company knowledge base'
+        : signals.weather
+          ? 'Open-Meteo weather signal'
+          : 'Shipment data',
     recommendation:
-      data?.recommended_actions?.length > 0
-        ? data.recommended_actions[0]
-        : isAtRisk
-          ? 'Human review is recommended before operational action.'
-          : 'Continue monitoring this shipment.',
+      riskState === 'at_risk'
+        ? 'Human review is recommended before operational action.'
+        : riskState === 'monitoring'
+          ? 'Continue monitoring this shipment and review available operational evidence.'
+          : 'Shipment is currently on track. Continue normal monitoring.',
     alternative:
       routeOptions.length > 0
         ? routeOptions[0]
@@ -228,16 +263,14 @@ function normalizeAnalysis(data) {
           : null,
     routeOptions,
     supplierOptions,
-    news,
     knowledgeResults,
-    findings: Array.isArray(data?.investigation_findings)
-      ? data.investigation_findings
-      : [],
+    evidence,
     briefing:
       typeof data?.briefing === 'string'
         ? data.briefing
         : 'No briefing was generated.',
     signals,
+    reportId: data?.report_id || null,
     raw: data,
   };
 }
@@ -250,51 +283,121 @@ function buildAlternativeText(shipment) {
   const alternative = shipment.alternative;
 
   if (alternative.route_name) {
-    const score =
-      typeof alternative.demo_reliability_score === 'number'
-        ? ` · demo reliability ${Math.round(
-            alternative.demo_reliability_score * 100,
-          )}%`
-        : '';
-
-    return `${alternative.route_name}${score}`;
+    return alternative.route_name;
   }
 
   if (alternative.supplier_name) {
-    const score =
-      typeof alternative.reliability_score === 'number'
-        ? ` · reliability ${Math.round(
-            alternative.reliability_score * 100,
-          )}%`
-        : '';
-
-    return `${alternative.supplier_name}${score}`;
+    return alternative.supplier_name;
   }
 
   return 'Alternative operational option identified';
 }
 
+function formatDate(value) {
+  if (!value) {
+    return '—';
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+
+  return date.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
 function App() {
   const [active, setActive] = useState('landing');
   const [selected, setSelected] = useState(null);
-  const [shipmentId, setShipmentId] = useState(DEFAULT_SHIPMENT_ID);
+  const [shipments, setShipments] = useState([]);
+  const [shipmentId, setShipmentId] = useState('');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('All');
   const [toast, setToast] = useState('');
   const [mobile, setMobile] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingShipments, setLoadingShipments] = useState(false);
   const [error, setError] = useState('');
+
+  const [shipmentFile, setShipmentFile] = useState(null);
+  const [knowledgeFile, setKnowledgeFile] = useState(null);
+  const [uploadingShipment, setUploadingShipment] = useState(false);
+  const [uploadingKnowledge, setUploadingKnowledge] = useState(false);
 
   const notify = (message) => {
     setToast(message);
     setTimeout(() => setToast(''), 2600);
   };
 
+  const loadShipments = async () => {
+    setLoadingShipments(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/shipments`,
+      );
+
+      let payload;
+
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          payload?.detail ||
+            `Unable to load shipments. HTTP ${response.status}.`,
+        );
+      }
+
+      const normalized = Array.isArray(payload)
+        ? payload.map(normalizeShipment)
+        : [];
+
+      setShipments(normalized);
+
+      if (normalized.length === 0) {
+        setSelected(null);
+        setShipmentId('');
+        return;
+      }
+
+      if (!selected) {
+        setSelected(normalized[0]);
+        setShipmentId(normalized[0].id);
+      }
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error
+          ? requestError.message
+          : 'Unable to load shipments.';
+
+      setError(message);
+    } finally {
+      setLoadingShipments(false);
+    }
+  };
+
+  useEffect(() => {
+    loadShipments();
+  }, []);
+
   const analyzeShipment = async (id = shipmentId) => {
-    const normalizedId = String(id || '').trim();
+    const normalizedId = String(id || '')
+      .trim()
+      .replace(/,+$/, '');
 
     if (!normalizedId) {
-      setError('Enter a shipment ID before running an analysis.');
+      setError(
+        'Upload shipment data or select a shipment before running an analysis.',
+      );
       return;
     }
 
@@ -302,15 +405,11 @@ function App() {
     setError('');
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/analyze`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          shipment_id: normalizedId,
-        }),
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/api/shipments/${encodeURIComponent(
+          normalizedId,
+        )}/analyze`,
+      );
 
       let payload;
 
@@ -334,6 +433,8 @@ function App() {
       setShipmentId(normalized.id);
       setActive('overview');
 
+      await loadShipments();
+
       notify(`Analysis completed for shipment ${normalized.id}.`);
     } catch (requestError) {
       const message =
@@ -348,22 +449,161 @@ function App() {
     }
   };
 
-  const filtered = useMemo(() => {
-    if (!selected) {
-      return [];
+  const uploadShipmentData = async () => {
+    if (!shipmentFile) {
+      notify('Choose a CSV or XLSX shipment file first.');
+      return;
     }
 
-    const matchesQuery = `${selected.id} ${selected.name} ${selected.route} ${selected.supplier}`
-      .toLowerCase()
-      .includes(query.toLowerCase());
+    setUploadingShipment(true);
+    setError('');
 
-    const matchesFilter =
-      filter === 'All' ||
-      (filter === 'At risk' && selected.isAtRisk) ||
-      (filter === 'On track' && !selected.isAtRisk);
+    try {
+      const formData = new FormData();
+      formData.append('file', shipmentFile);
 
-    return matchesQuery && matchesFilter ? [selected] : [];
-  }, [selected, query, filter]);
+      const response = await fetch(
+        `${API_BASE_URL}/api/shipments/import`,
+        {
+          method: 'POST',
+          body: formData,
+        },
+      );
+
+      let payload;
+
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          payload?.detail ||
+            `Shipment import failed. HTTP ${response.status}.`,
+        );
+      }
+
+      setShipmentFile(null);
+
+      await loadShipments();
+
+      const imported =
+        payload?.imported ??
+        payload?.created ??
+        payload?.imported_count ??
+        null;
+
+      notify(
+        imported !== null
+          ? `${imported} shipment${imported === 1 ? '' : 's'} imported successfully.`
+          : 'Shipment data imported successfully.',
+      );
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error
+          ? requestError.message
+          : 'Shipment import failed.';
+
+      setError(message);
+      notify('Shipment upload failed.');
+    } finally {
+      setUploadingShipment(false);
+    }
+  };
+
+  const uploadKnowledge = async () => {
+    if (!knowledgeFile) {
+      notify('Choose a Markdown or TXT knowledge document first.');
+      return;
+    }
+
+    setUploadingKnowledge(true);
+    setError('');
+
+    try {
+      const formData = new FormData();
+      formData.append('file', knowledgeFile);
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/knowledge/upload`,
+        {
+          method: 'POST',
+          body: formData,
+        },
+      );
+
+      let payload;
+
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          payload?.detail ||
+            `Knowledge upload failed. HTTP ${response.status}.`,
+        );
+      }
+
+      setKnowledgeFile(null);
+
+      notify(
+        `${payload?.chunks_ingested || 0} knowledge chunks added to the knowledge base.`,
+      );
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error
+          ? requestError.message
+          : 'Knowledge upload failed.';
+
+      setError(message);
+      notify('Knowledge upload failed.');
+    } finally {
+      setUploadingKnowledge(false);
+    }
+  };
+
+  const filtered = useMemo(() => {
+    const normalizedQuery = query.toLowerCase().trim();
+
+    return shipments.filter((shipment) => {
+      const matchesQuery =
+        !normalizedQuery ||
+        `${shipment.id} ${shipment.trackingNumber} ${shipment.carrier} ${shipment.origin} ${shipment.destination}`
+          .toLowerCase()
+          .includes(normalizedQuery);
+
+      const matchesFilter =
+        filter === 'All' ||
+        (filter === 'At risk' &&
+          shipment.riskState === 'at_risk') ||
+        (filter === 'Monitoring' &&
+          shipment.riskState === 'monitoring') ||
+        (filter === 'On track' &&
+          shipment.riskState === 'on_track');
+
+      return matchesQuery && matchesFilter;
+    });
+  }, [shipments, query, filter]);
+
+  const riskCounts = useMemo(
+    () => ({
+      atRisk: shipments.filter(
+        (shipment) => shipment.riskState === 'at_risk',
+      ).length,
+      monitoring: shipments.filter(
+        (shipment) => shipment.riskState === 'monitoring',
+      ).length,
+      onTrack: shipments.filter(
+        (shipment) => shipment.riskState === 'on_track',
+      ).length,
+    }),
+    [shipments],
+  );
 
   const handleNav = (key) => {
     if (key === 'landing') {
@@ -372,20 +612,18 @@ function App() {
       return;
     }
 
-    if (key === 'shipments') {
-      setActive('shipments');
-      setMobile(false);
-      return;
-    }
-
     if (key === 'alerts') {
       setActive('alerts');
       setMobile(false);
 
-      if (selected?.isAtRisk) {
-        notify('The selected shipment requires human review.');
+      if (riskCounts.atRisk > 0) {
+        notify(
+          `${riskCounts.atRisk} shipment${
+            riskCounts.atRisk === 1 ? '' : 's'
+          } require${riskCounts.atRisk === 1 ? 's' : ''} human review.`,
+        );
       } else {
-        notify('No active risk alert is loaded.');
+        notify('No active risk alerts.');
       }
 
       return;
@@ -395,28 +633,34 @@ function App() {
     setMobile(false);
   };
 
+  const selectShipment = (shipment) => {
+    setSelected(shipment);
+    setShipmentId(shipment.id);
+  };
+
   if (active === 'landing') {
     return (
       <Landing
         openDashboard={() => {
           setActive('overview');
 
-          if (!selected) {
-            analyzeShipment(DEFAULT_SHIPMENT_ID);
+          if (!selected && shipments.length > 0) {
+            selectShipment(shipments[0]);
           }
         }}
       />
     );
   }
 
-  const currentRisk = selected?.risk ?? 0;
-  const currentStatus = selected?.riskStatus || 'Not analyzed';
+  const selectedRiskState = selected?.riskState || 'monitoring';
+  const currentStatus =
+    selected?.riskStatus || 'Not analyzed';
 
   const signalCount = selected
     ? [
         selected.signals.weather,
+        selected.signals.knowledge,
         selected.signals.route,
-        selected.signals.news,
         selected.signals.suppliers,
       ].filter(Boolean).length
     : 0;
@@ -472,8 +716,10 @@ function App() {
 
               <span>{label}</span>
 
-              {key === 'alerts' && selected?.isAtRisk && (
-                <em className="nav-count">1</em>
+              {key === 'alerts' && riskCounts.atRisk > 0 && (
+                <em className="nav-count">
+                  {riskCounts.atRisk}
+                </em>
               )}
             </button>
           ))}
@@ -486,20 +732,26 @@ function App() {
         <div className="source-list">
           <div>
             <span className="live-dot" /> Shipment data
-            <span className="source-live">DataCo</span>
+            <span className="source-live">
+              {shipments.length > 0 ? 'Connected' : 'Awaiting'}
+            </span>
           </div>
 
           <div>
             <span className="live-dot weather-dot" /> Weather
             <span className="source-live">
-              {selected?.signals.weather ? 'Live' : 'Unavailable'}
+              {selected?.signals.weather
+                ? 'Live'
+                : 'Available'}
             </span>
           </div>
 
           <div>
-            <span className="source-dot" /> Regional news
-            <span className="source-live paused">
-              {selected?.signals.news ? 'Available' : 'Optional'}
+            <span className="source-dot" /> Knowledge base
+            <span className="source-live">
+              {selected?.signals.knowledge
+                ? 'Active'
+                : 'Ready'}
             </span>
           </div>
         </div>
@@ -530,7 +782,11 @@ function App() {
 
           <button
             className="nav-link"
-            onClick={() => notify('Settings will be available in a later release.')}
+            onClick={() =>
+              notify(
+                'Settings will be available in a later release.',
+              )
+            }
           >
             <Settings2 size={17} />
             Settings
@@ -538,7 +794,11 @@ function App() {
 
           <button
             className="nav-link"
-            onClick={() => notify('Help center will be available in a later release.')}
+            onClick={() =>
+              notify(
+                'Help center will be available in a later release.',
+              )
+            }
           >
             <LifeBuoy size={17} />
             Help center
@@ -552,7 +812,10 @@ function App() {
               <small>Operations workspace</small>
             </div>
 
-            <MoreHorizontal size={17} className="muted" />
+            <MoreHorizontal
+              size={17}
+              className="muted"
+            />
           </div>
         </div>
       </aside>
@@ -578,7 +841,8 @@ function App() {
             Operations
             <ChevronRight size={14} />
             <strong>
-              {nav.find((n) => n[0] === active)?.[1] || 'Overview'}
+              {nav.find((n) => n[0] === active)?.[1] ||
+                'Overview'}
             </strong>
           </div>
 
@@ -591,7 +855,9 @@ function App() {
             <button
               className="icon-btn help-btn"
               onClick={() =>
-                notify('Enter a shipment ID and run SentinelAI analysis.')
+                notify(
+                  'Upload shipment data, add knowledge, then select a shipment to investigate.',
+                )
               }
             >
               <CircleHelp size={18} />
@@ -602,7 +868,7 @@ function App() {
               onClick={() => handleNav('alerts')}
             >
               <Bell size={18} />
-              {selected?.isAtRisk && <i />}
+              {riskCounts.atRisk > 0 && <i />}
             </button>
 
             <div className="top-avatar">TA</div>
@@ -615,7 +881,8 @@ function App() {
               <div className="eyebrow">
                 <span className="eyebrow-line" />
                 SENTINELAI · OPERATIONAL INTELLIGENCE
-                {selected?.isAtRisk && (
+
+                {riskCounts.atRisk > 0 && (
                   <span className="eyebrow-live">
                     <span className="live-dot" />
                     REVIEW REQUIRED
@@ -624,12 +891,13 @@ function App() {
               </div>
 
               <h1>
-                Supply chain intelligence <span className="wave">✳</span>
+                Supply chain intelligence{' '}
+                <span className="wave">✳</span>
               </h1>
 
               <p className="subtitle">
-                Predict disruption risk, investigate evidence, and support
-                human operational decisions.
+                Predict disruption risk, investigate evidence,
+                and support human operational decisions.
               </p>
             </div>
 
@@ -639,7 +907,9 @@ function App() {
 
                 <input
                   value={shipmentId}
-                  onChange={(event) => setShipmentId(event.target.value)}
+                  onChange={(event) =>
+                    setShipmentId(event.target.value)
+                  }
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') {
                       analyzeShipment();
@@ -654,11 +924,15 @@ function App() {
                 className="btn btn-secondary"
                 onClick={() => {
                   if (!selected) {
-                    notify('Run an analysis before exporting a report.');
+                    notify(
+                      'Run an analysis before exporting a report.',
+                    );
                     return;
                   }
 
-                  notify('Report export will be connected to the briefing pipeline.');
+                  notify(
+                    'Report export will be connected to the briefing pipeline.',
+                  );
                 }}
               >
                 <Download size={15} />
@@ -681,7 +955,7 @@ function App() {
               <AlertTriangle size={17} />
 
               <div>
-                <b>Analysis unavailable</b>
+                <b>Operation unavailable</b>
                 <p>{error}</p>
               </div>
 
@@ -695,55 +969,173 @@ function App() {
             </div>
           )}
 
+          <section className="upload-grid">
+            <div className="panel upload-panel">
+              <div className="upload-panel-icon shipment-upload">
+                <Truck size={18} />
+              </div>
+
+              <div className="upload-panel-content">
+                <div className="section-tag">
+                  <span />
+                  SHIPMENT DATA
+                </div>
+
+                <h2>Import shipments</h2>
+
+                <p>
+                  Upload your company's CSV or Excel shipment
+                  data to populate the operational workspace.
+                </p>
+
+                <div className="upload-controls">
+                  <label className="file-picker">
+                    <Upload size={15} />
+
+                    <span>
+                      {shipmentFile
+                        ? shipmentFile.name
+                        : 'Choose CSV or XLSX'}
+                    </span>
+
+                    <input
+                      type="file"
+                      accept=".csv,.xlsx"
+                      onChange={(event) =>
+                        setShipmentFile(
+                          event.target.files?.[0] || null,
+                        )
+                      }
+                    />
+                  </label>
+
+                  <button
+                    className="btn btn-primary"
+                    onClick={uploadShipmentData}
+                    disabled={
+                      uploadingShipment || !shipmentFile
+                    }
+                  >
+                    <Upload size={15} />
+                    {uploadingShipment
+                      ? 'Importing…'
+                      : 'Import data'}
+                  </button>
+                </div>
+
+                <small className="upload-note">
+                  CSV and XLSX files supported
+                </small>
+              </div>
+            </div>
+
+            <div className="panel upload-panel">
+              <div className="upload-panel-icon knowledge-upload">
+                <FileText size={18} />
+              </div>
+
+              <div className="upload-panel-content">
+                <div className="section-tag">
+                  <span />
+                  KNOWLEDGE BASE
+                </div>
+
+                <h2>Add operational knowledge</h2>
+
+                <p>
+                  Upload company procedures and SOPs so SentinelAI
+                  can ground investigations in your own guidance.
+                </p>
+
+                <div className="upload-controls">
+                  <label className="file-picker">
+                    <FileText size={15} />
+
+                    <span>
+                      {knowledgeFile
+                        ? knowledgeFile.name
+                        : 'Choose MD or TXT'}
+                    </span>
+
+                    <input
+                      type="file"
+                      accept=".md,.txt"
+                      onChange={(event) =>
+                        setKnowledgeFile(
+                          event.target.files?.[0] || null,
+                        )
+                      }
+                    />
+                  </label>
+
+                  <button
+                    className="btn btn-primary"
+                    onClick={uploadKnowledge}
+                    disabled={
+                      uploadingKnowledge || !knowledgeFile
+                    }
+                  >
+                    <Upload size={15} />
+                    {uploadingKnowledge
+                      ? 'Adding…'
+                      : 'Add knowledge'}
+                  </button>
+                </div>
+
+                <small className="upload-note">
+                  Markdown and TXT files supported
+                </small>
+              </div>
+            </div>
+          </section>
+
           <section className="metrics-grid">
             <Metric
-              label="Current shipment"
-              value={selected?.id || '—'}
-              delta={selected ? selected.status.replaceAll('_', ' ') : 'Not analyzed'}
-              up={false}
-              note="DataCo shipment record"
+              label="Total shipments"
+              value={shipments.length || '—'}
+              delta={
+                shipments.length
+                  ? 'Workspace data'
+                  : 'Awaiting upload'
+              }
+              up={shipments.length > 0}
+              note="Company shipment records"
               icon={Truck}
               tone="lavender"
             />
 
             <Metric
-              label="Delay risk"
-              value={selected ? `${currentRisk}%` : '—'}
-              delta={selected ? currentStatus : 'Awaiting analysis'}
-              up={selected?.isAtRisk}
-              note={
-                selected?.threshold !== null && selected?.threshold !== undefined
-                  ? `Model threshold ${Math.round(selected.threshold * 100)}%`
-                  : 'Risk assessment'
+              label="At risk"
+              value={riskCounts.atRisk || '—'}
+              delta={
+                riskCounts.atRisk
+                  ? 'Review required'
+                  : 'No active alerts'
               }
+              up={riskCounts.atRisk > 0}
+              note="Deterministic operational risk state"
               icon={AlertTriangle}
               tone="peach"
-              alert={selected?.isAtRisk}
+              alert={riskCounts.atRisk > 0}
             />
 
             <Metric
-              label="Evidence signals"
-              value={selected ? signalCount : '—'}
-              delta={
-                selected
-                  ? `${selected.routeOptions.length} route option${
-                      selected.routeOptions.length === 1 ? '' : 's'
-                    }`
-                  : 'Not analyzed'
-              }
-              up={signalCount > 0}
-              note="Available investigation evidence"
-              icon={PackageCheck}
+              label="Monitoring"
+              value={riskCounts.monitoring || '—'}
+              delta="Needs observation"
+              up={riskCounts.monitoring > 0}
+              note="Shipment state requires monitoring"
+              icon={Clock3}
               tone="mint"
             />
 
             <Metric
-              label="Knowledge sources"
-              value={selected ? selected.knowledgeResults.length : '—'}
-              delta="RAG results"
-              up={selected?.knowledgeResults.length > 0}
-              note="Operational procedures retrieved"
-              icon={Clock3}
+              label="On track"
+              value={riskCounts.onTrack || '—'}
+              delta="Normal status"
+              up={riskCounts.onTrack > 0}
+              note="No current operational risk flag"
+              icon={PackageCheck}
               tone="sky"
             />
           </section>
@@ -767,16 +1159,20 @@ function App() {
 
                 <p>
                   <b>
-                    {selected.isAtRisk
+                    {selected.riskState === 'at_risk'
                       ? 'Human review is recommended.'
-                      : 'No elevated risk was detected.'}
+                      : selected.riskState === 'monitoring'
+                        ? 'Shipment requires continued monitoring.'
+                        : 'Shipment is currently on track.'}
                   </b>{' '}
-                  SentinelAI assessed this shipment at{' '}
-                  <b>{selected.risk}% delay risk</b>.{' '}
+                  Current operational state:{' '}
+                  <b>{selected.riskStatus}</b>.{' '}
                   {selected.reason}
                 </p>
 
-                <button onClick={() => setActive('overview')}>
+                <button
+                  onClick={() => setActive('overview')}
+                >
                   Read briefing <ArrowRight size={14} />
                 </button>
               </div>
@@ -807,18 +1203,23 @@ function App() {
                 <h3>No shipment analysis loaded</h3>
 
                 <p>
-                  Enter a DataCo shipment ID above and run SentinelAI to
-                  generate a risk assessment and investigation.
+                  Upload shipment data, select a shipment, and
+                  run SentinelAI to generate an investigation.
                 </p>
               </div>
 
-              <button
-                className="btn btn-primary"
-                onClick={() => analyzeShipment(DEFAULT_SHIPMENT_ID)}
-                disabled={loading}
-              >
-                Analyze 77202 <ArrowRight size={14} />
-              </button>
+              {shipments.length > 0 && (
+                <button
+                  className="btn btn-primary"
+                  onClick={() =>
+                    analyzeShipment(shipments[0].id)
+                  }
+                  disabled={loading}
+                >
+                  Analyze first shipment{' '}
+                  <ArrowRight size={14} />
+                </button>
+              )}
             </section>
           )}
 
@@ -826,19 +1227,23 @@ function App() {
             <div className="panel shipments-panel">
               <div className="panel-header">
                 <div>
-                  <h2>Shipment under investigation</h2>
+                  <h2>My shipments</h2>
+
                   <p>
-                    Historical shipment data used by the SentinelAI
-                    intelligence pipeline.
+                    Company shipment records available for
+                    SentinelAI investigation.
                   </p>
                 </div>
 
                 <button
                   className="text-button"
-                  onClick={() => analyzeShipment()}
-                  disabled={loading}
+                  onClick={loadShipments}
+                  disabled={loadingShipments}
                 >
-                  Refresh analysis <ArrowRight size={14} />
+                  {loadingShipments
+                    ? 'Refreshing…'
+                    : 'Refresh shipments'}{' '}
+                  <ArrowRight size={14} />
                 </button>
               </div>
 
@@ -848,8 +1253,10 @@ function App() {
 
                   <input
                     value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Search analyzed shipment…"
+                    onChange={(event) =>
+                      setQuery(event.target.value)
+                    }
+                    placeholder="Search shipments…"
                   />
                 </div>
 
@@ -860,8 +1267,10 @@ function App() {
                       filter === 'All'
                         ? 'At risk'
                         : filter === 'At risk'
-                          ? 'On track'
-                          : 'All',
+                          ? 'Monitoring'
+                          : filter === 'Monitoring'
+                            ? 'On track'
+                            : 'All',
                     );
                   }}
                 >
@@ -874,7 +1283,7 @@ function App() {
                   className="icon-btn table-settings"
                   onClick={() =>
                     notify(
-                      'Shipment fields shown are sourced from the current analysis.',
+                      'Shipment fields are sourced from your uploaded company data.',
                     )
                   }
                 >
@@ -898,8 +1307,12 @@ function App() {
                     {filtered.map((shipment) => (
                       <tr
                         key={shipment.id}
-                        onClick={() => setSelected(shipment)}
-                        className="row-selected"
+                        onClick={() => selectShipment(shipment)}
+                        className={
+                          selected?.id === shipment.id
+                            ? 'row-selected'
+                            : ''
+                        }
                       >
                         <td>
                           <div className="shipment-cell">
@@ -916,12 +1329,12 @@ function App() {
                             </div>
 
                             <div>
-                              <b>{shipment.name}</b>
+                              <b>{shipment.id}</b>
 
                               <small>
-                                {shipment.id}
+                                {shipment.trackingNumber}
                                 <span> · </span>
-                                {shipment.shippingMode}
+                                {shipment.carrier}
                               </small>
                             </div>
                           </div>
@@ -933,7 +1346,7 @@ function App() {
                           </b>
 
                           <small className="eta-time">
-                            {shipment.orderRegion}
+                            ETA {formatDate(shipment.estimatedArrival)}
                           </small>
                         </td>
 
@@ -942,34 +1355,28 @@ function App() {
                             <div className="risk-bar">
                               <i
                                 style={{
-                                  width: `${shipment.risk}%`,
+                                  width: `${shipment.riskWidth}%`,
                                 }}
-                                className={
-                                  shipment.risk >= 70
-                                    ? 'high'
-                                    : shipment.risk >= 40
-                                      ? 'medium'
-                                      : 'low'
-                                }
+                                className={shipment.riskTone}
                               />
                             </div>
 
-                            <b>{shipment.risk}%</b>
+                            <b>{shipment.riskStatus}</b>
                           </div>
                         </td>
 
                         <td>
                           <span
                             className={`status-pill ${
-                              shipment.risk >= 70
+                              shipment.riskTone === 'high'
                                 ? 'status-high'
-                                : shipment.risk >= 40
+                                : shipment.riskTone === 'medium'
                                   ? 'status-medium'
                                   : 'status-low'
                             }`}
                           >
                             <i />
-                            {shipment.riskStatus}
+                            {shipment.status}
                           </span>
                         </td>
 
@@ -979,7 +1386,7 @@ function App() {
                             aria-label="View details"
                             onClick={(event) => {
                               event.stopPropagation();
-                              setSelected(shipment);
+                              selectShipment(shipment);
                             }}
                           >
                             <ArrowRight size={15} />
@@ -992,16 +1399,17 @@ function App() {
 
                 {filtered.length === 0 && (
                   <div className="empty-state">
-                    {selected
-                      ? 'No shipment matches the current search/filter.'
-                      : 'Run an analysis to load shipment intelligence.'}
+                    {shipments.length === 0
+                      ? 'Upload a CSV or XLSX file to add shipments to your workspace.'
+                      : 'No shipment matches the current search/filter.'}
                   </div>
                 )}
               </div>
 
               <div className="table-footer">
                 <span>
-                  Showing <b>{filtered.length}</b> analyzed shipment
+                  Showing <b>{filtered.length}</b> of{' '}
+                  <b>{shipments.length}</b> shipments
                 </span>
 
                 <div>
@@ -1014,7 +1422,6 @@ function App() {
                   <button
                     className="page-btn"
                     disabled
-                    title="Pagination will be connected when shipment listing is added."
                   >
                     <ChevronRight size={15} />
                   </button>
@@ -1028,7 +1435,7 @@ function App() {
                   <div>
                     <div className="section-tag">
                       <span />
-                      {selected?.isAtRisk
+                      {selected?.riskState === 'at_risk'
                         ? 'PRIORITY CASE'
                         : 'SHIPMENT ANALYSIS'}
                     </div>
@@ -1048,12 +1455,12 @@ function App() {
 
                 {selected ? (
                   <>
-                    <h2>{selected.name}</h2>
+                    <h2>{selected.id}</h2>
 
                     <p className="detail-id">
-                      {selected.id}
+                      {selected.trackingNumber}
                       <span> · </span>
-                      {selected.supplier}
+                      {selected.carrier}
                     </p>
 
                     <div className="detail-route">
@@ -1061,17 +1468,13 @@ function App() {
                         <MapPin size={14} />
                       </div>
 
-                      <span>
-                        {selected.destination}
-                        {' · '}
-                        {selected.orderRegion}
-                      </span>
+                      <span>{selected.route}</span>
 
                       <button
                         className="icon-btn route-map"
                         onClick={() =>
                           notify(
-                            'Map visualization will use route intelligence in the next UI integration.',
+                            'Map visualization will be connected to route intelligence later.',
                           )
                         }
                       >
@@ -1081,29 +1484,33 @@ function App() {
 
                     <div className="detail-stats">
                       <div>
-                        <small>ORDER DATE</small>
-                        <b>{selected.orderDate}</b>
+                        <small>ESTIMATED ARRIVAL</small>
+                        <b>
+                          {formatDate(
+                            selected.estimatedArrival,
+                          )}
+                        </b>
                       </div>
 
                       <div>
-                        <small>SCHEDULED SHIPPING</small>
-                        <b>{selected.scheduledDays} days</b>
+                        <small>SHIPPING MODE</small>
+                        <b>{selected.shippingMode}</b>
                       </div>
 
                       <div>
-                        <small>DELAY RISK</small>
+                        <small>RISK STATE</small>
                         <b
                           className={
-                            selected.risk >= 70
+                            selected.riskTone === 'high'
                               ? 'text-red'
-                              : selected.risk >= 40
+                              : selected.riskTone === 'medium'
                                 ? 'text-amber'
                                 : 'text-green'
                           }
                         >
-                          {selected.risk}%
+                          {selected.riskStatus}
                           <span className="risk-sub">
-                            {selected.riskStatus}
+                            Operational state
                           </span>
                         </b>
                       </div>
@@ -1122,7 +1529,9 @@ function App() {
                       </div>
 
                       <span className="confidence">
-                        {selected.isAtRisk ? 'REVIEW' : 'SIGNAL'}
+                        {selected.riskState === 'at_risk'
+                          ? 'REVIEW'
+                          : 'SIGNAL'}
                       </span>
                     </div>
 
@@ -1132,7 +1541,9 @@ function App() {
                       <div>
                         <b>{selected.reason}</b>
 
-                        <small>{selected.evidenceSource}</small>
+                        <small>
+                          {selected.evidenceSource}
+                        </small>
                       </div>
                     </div>
 
@@ -1160,17 +1571,21 @@ function App() {
                           )
                         }
                       >
-                        Review this action <ArrowRight size={14} />
+                        Review this action{' '}
+                        <ArrowRight size={14} />
                       </button>
                     </div>
                   </>
                 ) : (
                   <div className="empty-detail">
                     <Sparkles size={24} />
+
                     <h3>No analysis yet</h3>
+
                     <p>
-                      Run SentinelAI on a shipment to inspect its risk,
-                      evidence, alternatives, and operational procedures.
+                      Select a shipment and run SentinelAI to
+                      inspect its risk, evidence, and operational
+                      procedures.
                     </p>
                   </div>
                 )}
@@ -1180,7 +1595,9 @@ function App() {
                 <div className="signal-head">
                   <div>
                     <h3>Signal sources</h3>
-                    <p>Data availability for this investigation</p>
+                    <p>
+                      Data availability for this investigation
+                    </p>
                   </div>
 
                   <button
@@ -1199,16 +1616,25 @@ function App() {
 
                   <div>
                     <b>Shipment data</b>
+
                     <small>
                       {selected
-                        ? 'DataCo record loaded'
-                        : 'Awaiting analysis'}
+                        ? 'Company shipment loaded'
+                        : shipments.length
+                          ? `${shipments.length} shipment records`
+                          : 'Awaiting upload'}
                     </small>
                   </div>
 
-                  <span className="signal-ok">
-                    <Check size={12} /> Available
-                  </span>
+                  {shipments.length > 0 ? (
+                    <span className="signal-ok">
+                      <Check size={12} /> Available
+                    </span>
+                  ) : (
+                    <span className="signal-warn">
+                      Awaiting
+                    </span>
+                  )}
                 </div>
 
                 <div className="signal-row">
@@ -1218,10 +1644,11 @@ function App() {
 
                   <div>
                     <b>Weather</b>
+
                     <small>
                       {selected?.signals.weather
                         ? 'Observation available'
-                        : 'No observation returned'}
+                        : 'Available when coordinates are supplied'}
                     </small>
                   </div>
 
@@ -1230,7 +1657,9 @@ function App() {
                       <Check size={12} /> Available
                     </span>
                   ) : (
-                    <span className="signal-warn">Unavailable</span>
+                    <span className="signal-warn">
+                      Optional
+                    </span>
                   )}
                 </div>
 
@@ -1240,22 +1669,27 @@ function App() {
                   </div>
 
                   <div>
-                    <b>Regional news</b>
+                    <b>Knowledge base</b>
+
                     <small>
-                      {selected?.signals.news
-                        ? `${selected.news.length} article${
-                            selected.news.length === 1 ? '' : 's'
+                      {selected?.knowledgeResults?.length
+                        ? `${selected.knowledgeResults.length} relevant source${
+                            selected.knowledgeResults.length === 1
+                              ? ''
+                              : 's'
                           }`
-                        : 'No records returned'}
+                        : 'Company procedures available'}
                     </small>
                   </div>
 
-                  {selected?.signals.news ? (
+                  {selected?.signals.knowledge ? (
                     <span className="signal-ok">
-                      <Check size={12} /> Available
+                      <Check size={12} /> Active
                     </span>
                   ) : (
-                    <span className="signal-warn">Optional</span>
+                    <span className="signal-warn">
+                      Ready
+                    </span>
                   )}
                 </div>
 
@@ -1266,6 +1700,7 @@ function App() {
 
                   <div>
                     <b>Route intelligence</b>
+
                     <small>
                       {selected
                         ? `${selected.routeOptions.length} alternative${
@@ -1273,7 +1708,7 @@ function App() {
                               ? ''
                               : 's'
                           }`
-                        : 'Awaiting analysis'}
+                        : 'Available for future integration'}
                     </small>
                   </div>
 
@@ -1282,7 +1717,9 @@ function App() {
                       <Check size={12} /> Available
                     </span>
                   ) : (
-                    <span className="signal-warn">None</span>
+                    <span className="signal-warn">
+                      Optional
+                    </span>
                   )}
                 </div>
               </div>
@@ -1294,9 +1731,10 @@ function App() {
               <div className="panel-header">
                 <div>
                   <h2>Operational briefing</h2>
+
                   <p>
-                    Evidence-grounded decision support generated from the
-                    current investigation.
+                    Evidence-grounded decision support generated
+                    from the current investigation.
                   </p>
                 </div>
 
@@ -1306,15 +1744,14 @@ function App() {
                 </span>
               </div>
 
-              <pre className="briefing-content">{selected.briefing}</pre>
+              <OperationalBriefing shipment={selected} />
             </section>
           )}
 
           <footer className="footer">
             <span>
               <span className="live-dot" />
-              SentinelAI · Data and signals shown reflect the current
-              analysis
+              SentinelAI · Company shipment and knowledge data
             </span>
 
             <span>
@@ -1334,6 +1771,381 @@ function App() {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function OperationalBriefing({ shipment }) {
+  const risk = shipment?.raw?.risk || {};
+  const weather = shipment?.raw?.weather;
+  const routes = shipment?.routeOptions || [];
+  const suppliers = shipment?.supplierOptions || [];
+  const news = shipment?.raw?.news_results || [];
+  const knowledge = shipment?.knowledgeResults || [];
+
+  const evidence = shipment?.evidence || [];
+
+  const statusEvidence = evidence.find(
+    (item) => item?.type === 'shipment_status',
+  );
+
+  const etaEvidence = evidence.find(
+    (item) => item?.type === 'estimated_arrival',
+  );
+
+  const etaPassed =
+    etaEvidence?.value &&
+    new Date(etaEvidence.value).getTime() < Date.now();
+
+  return (
+    <div className="operational-briefing">
+      <div className="briefing-summary">
+        <div className="briefing-summary-icon">
+          <AlertTriangle size={17} />
+        </div>
+
+        <div>
+          <span className="briefing-section-label">
+            EXECUTIVE SUMMARY
+          </span>
+
+          <h3>
+            Shipment {shipment.id}{' '}
+            {risk.state === 'at_risk'
+              ? 'requires human review.'
+              : risk.state === 'monitoring'
+                ? 'requires continued monitoring.'
+                : 'is currently on track.'}
+          </h3>
+
+          <p>
+            The shipment is currently{' '}
+            <strong>
+              {statusEvidence?.value || shipment.status}
+            </strong>
+            {etaPassed
+              ? ', and its estimated arrival time has passed.'
+              : '.'}{' '}
+            SentinelAI combines the operational state with the
+            CatBoost prediction and external investigation evidence.
+          </p>
+        </div>
+      </div>
+
+      <div className="briefing-section">
+        <div className="briefing-section-heading">
+          <span className="briefing-section-label">
+            RISK ASSESSMENT
+          </span>
+        </div>
+
+        <div className="briefing-risk-grid">
+          <div className="briefing-stat">
+            <span>Operational risk</span>
+            <strong className="risk-value risk-danger">
+              {formatRiskState(risk.state)}
+            </strong>
+          </div>
+
+          <div className="briefing-stat">
+            <span>CatBoost probability</span>
+            <strong>
+              {typeof risk.ml_probability === 'number'
+                ? `${(risk.ml_probability * 100).toFixed(1)}%`
+                : 'Unavailable'}
+            </strong>
+          </div>
+
+          <div className="briefing-stat">
+            <span>Decision threshold</span>
+            <strong>
+              {typeof risk.ml_threshold === 'number'
+                ? `${(risk.ml_threshold * 100).toFixed(1)}%`
+                : 'Unavailable'}
+            </strong>
+          </div>
+
+          <div className="briefing-stat">
+            <span>ML classification</span>
+            <strong
+              className={
+                risk.ml_is_at_risk
+                  ? 'risk-danger'
+                  : 'risk-safe'
+              }
+            >
+              {risk.ml_available
+                ? risk.ml_is_at_risk
+                  ? 'At risk'
+                  : 'Not at risk'
+                : 'Unavailable'}
+            </strong>
+          </div>
+        </div>
+
+        {risk.ml_available &&
+          risk.ml_is_at_risk !== null &&
+          risk.state === 'at_risk' &&
+          !risk.ml_is_at_risk && (
+            <div className="briefing-note briefing-note-warning">
+              <AlertTriangle size={14} />
+
+              <span>
+                Operational status and ML classification differ.
+                The shipment is operationally delayed even though
+                its predicted probability is below the model
+                threshold.
+              </span>
+            </div>
+          )}
+      </div>
+
+      <div className="briefing-section">
+        <div className="briefing-section-heading">
+          <span className="briefing-section-label">
+            INVESTIGATION EVIDENCE
+          </span>
+
+          <span className="briefing-count">
+            {evidence.length} signals
+          </span>
+        </div>
+
+        <div className="briefing-evidence-grid">
+          <div className="briefing-evidence-item">
+            <div className="briefing-evidence-icon">
+              <Truck size={15} />
+            </div>
+
+            <div>
+              <span>Shipment status</span>
+              <strong>
+                {statusEvidence?.value ||
+                  shipment.status ||
+                  'Unavailable'}
+              </strong>
+            </div>
+          </div>
+
+          <div className="briefing-evidence-item">
+            <div className="briefing-evidence-icon">
+              <Clock3 size={15} />
+            </div>
+
+            <div>
+              <span>Estimated arrival</span>
+              <strong>
+                {etaEvidence?.value
+                  ? formatDate(etaEvidence.value)
+                  : 'Unavailable'}
+              </strong>
+            </div>
+          </div>
+
+          <div className="briefing-evidence-item">
+            <div className="briefing-evidence-icon">
+              <CloudSun size={15} />
+            </div>
+
+            <div>
+              <span>Weather</span>
+
+              <strong>
+                {weather
+                  ? `${Number(weather.temperature_c).toFixed(1)}°C · ${Number(
+                      weather.precipitation_mm,
+                    ).toFixed(1)} mm rain`
+                  : 'Unavailable'}
+              </strong>
+            </div>
+          </div>
+
+          <div className="briefing-evidence-item">
+            <div className="briefing-evidence-icon">
+              <MapPin size={15} />
+            </div>
+
+            <div>
+              <span>Route intelligence</span>
+              <strong>
+                {routes.length > 0
+                  ? `${routes.length} route options`
+                  : 'Unavailable'}
+              </strong>
+            </div>
+          </div>
+
+          <div className="briefing-evidence-item">
+            <div className="briefing-evidence-icon">
+              <FileText size={15} />
+            </div>
+
+            <div>
+              <span>Knowledge base</span>
+              <strong>
+                {knowledge.length > 0
+                  ? `${knowledge.length} relevant sources`
+                  : 'No results'}
+              </strong>
+            </div>
+          </div>
+
+          <div className="briefing-evidence-item">
+            <div className="briefing-evidence-icon">
+              <Globe2 size={15} />
+            </div>
+
+            <div>
+              <span>External news</span>
+              <strong>
+                {news.length > 0
+                  ? `${news.length} relevant records`
+                  : 'No results'}
+              </strong>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {routes.length > 0 && (
+        <div className="briefing-section">
+          <div className="briefing-section-heading">
+            <span className="briefing-section-label">
+              ROUTE OPTIONS
+            </span>
+
+            <span className="briefing-count">
+              Human approval required
+            </span>
+          </div>
+
+          <div className="briefing-routes">
+            {routes.map((route) => (
+              <div
+                className="briefing-route"
+                key={route.route_id}
+              >
+                <div>
+                  <span>
+                    {route.recommendation ||
+                      `Route ${route.route_id}`}
+                  </span>
+
+                  <strong>
+                    {Number(route.distance_km).toFixed(1)} km
+                  </strong>
+                </div>
+
+                <div className="briefing-route-time">
+                  <Clock3 size={13} />
+
+                  {Number(route.duration_minutes / 60).toFixed(
+                    1,
+                  )}{' '}
+                  hrs
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="briefing-section">
+        <div className="briefing-section-heading">
+          <span className="briefing-section-label">
+            OBSERVED RISK SIGNALS
+          </span>
+        </div>
+
+        <div className="briefing-signals">
+          <div>
+            <Check size={14} />
+            <span>Operational shipment exception confirmed.</span>
+          </div>
+
+          {etaPassed && (
+            <div>
+              <Check size={14} />
+              <span>Estimated arrival time has passed.</span>
+            </div>
+          )}
+
+          {weather && (
+            <div>
+              <Check size={14} />
+              <span>
+                Weather data is available, but does not establish
+                causality.
+              </span>
+            </div>
+          )}
+
+          {routes.length > 0 && (
+            <div>
+              <Check size={14} />
+              <span>
+                Alternative routes are available for human review.
+              </span>
+            </div>
+          )}
+
+          {!news.length && (
+            <div className="signal-muted">
+              <CircleHelp size={14} />
+              <span>
+                No relevant external news evidence was returned.
+              </span>
+            </div>
+          )}
+
+          {!suppliers.length && (
+            <div className="signal-muted">
+              <CircleHelp size={14} />
+              <span>
+                No verified alternative suppliers were supplied.
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="briefing-action">
+        <div className="briefing-action-icon">
+          <ShieldCheck size={17} />
+        </div>
+
+        <div>
+          <span>RECOMMENDED HUMAN REVIEW</span>
+
+          <p>
+            Verify the confirmed shipment status, ETA, model
+            estimate, available routes, and applicable operating
+            procedures before taking action. SentinelAI does not
+            automatically reroute shipments or change suppliers.
+          </p>
+        </div>
+
+        <span className="briefing-human-badge">
+          Human decision
+        </span>
+      </div>
+
+      <div className="briefing-uncertainty">
+        <CircleHelp size={14} />
+
+        <div>
+          <strong>Uncertainties</strong>
+
+          <span>
+            {weather
+              ? 'Weather evidence is available but does not prove the cause of the delay.'
+              : 'Weather evidence is unavailable.'}{' '}
+            External news returned {news.length} result
+            {news.length === 1 ? '' : 's'}. External evidence may
+            be incomplete or unrelated to this shipment.
+          </span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1397,4 +2209,6 @@ function Metric({
   );
 }
 
-createRoot(document.getElementById('root')).render(<App />);
+createRoot(document.getElementById('root')).render(
+  <App />,
+);

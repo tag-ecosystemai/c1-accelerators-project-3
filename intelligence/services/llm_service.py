@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from typing import Any
 
 import requests
@@ -80,6 +81,73 @@ class LLMService:
                 news=news,
                 knowledge_results=knowledge_results,
                 investigation_findings=investigation_findings,
+            )
+
+        raise ValueError(
+            f"Unsupported LLM_PROVIDER '{self.provider}'. "
+            "Use 'azure_openai' or 'gemini'."
+        )
+
+    def generate_saas_briefing(
+        self,
+        *,
+        shipment: dict[str, Any],
+        risk: dict[str, Any],
+        weather: dict[str, Any] | None,
+        route_options: list[dict[str, Any]],
+        supplier_options: list[dict[str, Any]],
+        news_results: list[dict[str, Any]] | None = None,
+        evidence: list[dict[str, Any]],
+        knowledge_results: list[dict[str, Any]] | None = None,
+    ) -> str:
+        """
+        Generate an evidence-grounded briefing for a canonical SaaS shipment.
+
+        Unlike the DataCo briefing path, this does not assume a historical
+        ML probability or DataCo-specific shipment fields.
+        """
+        news_results = news_results or []
+        knowledge_results = knowledge_results or []
+
+        prompt = self._build_saas_prompt(
+            shipment=shipment,
+            risk=risk,
+            weather=weather,
+            route_options=route_options,
+            supplier_options=supplier_options,
+            news_results=news_results,
+            evidence=evidence,
+            knowledge_results=knowledge_results,
+        )
+
+        if self.provider == "azure_openai":
+            if self._azure_openai_configured():
+                return self._generate_with_azure_openai(prompt)
+
+            return self._generate_saas_fallback(
+                shipment=shipment,
+                risk=risk,
+                weather=weather,
+                route_options=route_options,
+                supplier_options=supplier_options,
+                news_results=news_results,
+                evidence=evidence,
+                knowledge_results=knowledge_results,
+            )
+
+        if self.provider == "gemini":
+            if os.getenv("GEMINI_API_KEY"):
+                return self._generate_with_gemini(prompt)
+
+            return self._generate_saas_fallback(
+                shipment=shipment,
+                risk=risk,
+                weather=weather,
+                route_options=route_options,
+                supplier_options=supplier_options,
+                news_results=news_results,
+                evidence=evidence,
+                knowledge_results=knowledge_results,
             )
 
         raise ValueError(
@@ -405,3 +473,553 @@ SUPPLIED EVIDENCE:
             raise RuntimeError(
                 "Gemini returned an unexpected response."
             ) from exc
+
+    @staticmethod
+    def _format_saas_weather(
+        weather: dict[str, Any] | None,
+    ) -> str:
+        if not weather:
+            return "Unavailable."
+
+        temperature = weather.get("temperature_c")
+        precipitation = weather.get("precipitation_mm")
+        wind = weather.get("wind_speed_kmh")
+
+        parts: list[str] = []
+
+        if temperature is not None:
+            parts.append(f"{float(temperature):.1f}°C")
+
+        if precipitation is not None:
+            parts.append(
+                f"{float(precipitation):.1f} mm precipitation"
+            )
+
+        if wind is not None:
+            parts.append(
+                f"{float(wind):.1f} km/h wind"
+            )
+
+        return ", ".join(parts) if parts else "Available."
+
+    @staticmethod
+    def _format_saas_routes(
+        route_options: list[dict[str, Any]],
+    ) -> list[str]:
+        if not route_options:
+            return ["No route alternatives were returned."]
+
+        formatted: list[str] = []
+
+        for route in route_options:
+            route_id = route.get("route_id", "Unknown")
+            distance = route.get("distance_km")
+            duration = route.get("duration_minutes")
+            recommendation = route.get(
+                "recommendation",
+                "Alternative route",
+            )
+
+            distance_text = (
+                f"{float(distance):.1f} km"
+                if distance is not None
+                else "distance unavailable"
+            )
+
+            duration_text = (
+                f"{float(duration) / 60:.1f} hours"
+                if duration is not None
+                else "duration unavailable"
+            )
+
+            formatted.append(
+                f"Route {route_id}: {recommendation}; "
+                f"{distance_text}; estimated driving time "
+                f"{duration_text}."
+            )
+
+        return formatted
+
+    @staticmethod
+    def _format_saas_suppliers(
+        supplier_options: list[dict[str, Any]],
+    ) -> list[str]:
+        if not supplier_options:
+            return ["No supplier alternatives were supplied."]
+
+        formatted: list[str] = []
+
+        for supplier in supplier_options:
+            name = supplier.get(
+                "name",
+                supplier.get("supplier", "Unknown supplier"),
+            )
+            formatted.append(
+                f"Supplier option: {name}."
+            )
+
+        return formatted
+
+    @staticmethod
+    def _format_saas_news(
+        news_results: list[dict[str, Any]],
+    ) -> list[str]:
+        if not news_results:
+            return ["No relevant external news records were returned."]
+
+        formatted: list[str] = []
+
+        for article in news_results:
+            title = article.get(
+                "title",
+                article.get("headline", "Untitled article"),
+            )
+
+            source = article.get(
+                "source",
+                article.get("domain", "Unknown source"),
+            )
+
+            formatted.append(
+                f"{title} — {source}."
+            )
+
+        return formatted
+
+    @staticmethod
+    def _format_saas_evidence(
+        evidence: list[dict[str, Any]],
+    ) -> list[str]:
+        if not evidence:
+            return ["No additional evidence was recorded."]
+
+        formatted: list[str] = []
+
+        for item in evidence:
+            evidence_type = str(
+                item.get("type", "evidence")
+            ).replace("_", " ").title()
+
+            source = str(
+                item.get("source", "unknown source")
+            )
+
+            value = item.get("value")
+
+            if evidence_type == "Ml Risk Prediction":
+                continue
+
+            if evidence_type == "Weather":
+                continue
+
+            if evidence_type == "Route Options":
+                continue
+
+            if value is None or value == "":
+                value_text = "Unavailable"
+            elif isinstance(value, dict):
+                value_text = "Available."
+            elif isinstance(value, list):
+                value_text = (
+                    f"{len(value)} record(s) available."
+                )
+            else:
+                value_text = str(value)
+
+            formatted.append(
+                f"- {evidence_type}: {value_text} "
+                f"(source: {source})."
+            )
+
+        return formatted
+
+    @staticmethod
+    def _eta_status(
+        estimated_arrival: str | None,
+    ) -> str | None:
+        if not estimated_arrival:
+            return None
+
+        try:
+            eta = datetime.fromisoformat(
+                estimated_arrival.replace("Z", "+00:00")
+            )
+
+            if eta.tzinfo is None:
+                eta = eta.replace(tzinfo=timezone.utc)
+
+            now = datetime.now(timezone.utc)
+
+            if eta < now:
+                return "The estimated arrival time has passed."
+
+            return "The estimated arrival time has not yet passed."
+
+        except (TypeError, ValueError):
+            return None
+
+    def _build_saas_prompt(
+        self,
+        *,
+        shipment: dict[str, Any],
+        risk: dict[str, Any],
+        weather: dict[str, Any] | None,
+        route_options: list[dict[str, Any]],
+        supplier_options: list[dict[str, Any]],
+        news_results: list[dict[str, Any]],
+        evidence: list[dict[str, Any]],
+        knowledge_results: list[dict[str, Any]],
+    ) -> str:
+        supplied_evidence = {
+            "shipment": shipment,
+            "risk": risk,
+            "weather": weather,
+            "route_options": route_options,
+            "supplier_options": supplier_options,
+            "external_news": news_results,
+            "evidence": evidence,
+            "knowledge_results": knowledge_results,
+        }
+
+        return f"""
+You are the operational intelligence assistant inside SentinelAI,
+a supply-chain disruption decision-support system.
+
+Produce a concise operational briefing for a human logistics operator.
+
+IMPORTANT RULES:
+
+1. Use ONLY the supplied evidence.
+2. Never invent shipment facts, causes, routes, suppliers, weather,
+   news, or operational conditions.
+3. The operational risk state is a deterministic assessment based on
+   the shipment status and estimated arrival.
+4. If an ML prediction is supplied, clearly label it as a model estimate.
+5. External news is contextual evidence only. Do not claim that a news
+   article caused the shipment disruption unless the supplied evidence
+   establishes that relationship.
+6. Clearly distinguish confirmed information from uncertainty.
+7. Do not claim that a route or supplier is available unless the
+   supplied evidence explicitly supports it.
+8. If evidence is missing, say that it is unavailable.
+9. Do not recommend automatic execution of operational actions.
+10. Final decisions belong to a human operator.
+11. Knowledge-base content may support a recommendation, but it must
+    not be treated as proof of the shipment's actual condition.
+12. Do not use knowledge outside the supplied evidence.
+13. If the estimated arrival time has passed, explicitly mention that
+    as temporal evidence.
+14. Do not treat a model classification of "not at risk" as proof that
+    a shipment currently marked delayed is safe.
+
+Return exactly these sections:
+
+EXECUTIVE SUMMARY
+RISK ASSESSMENT
+EVIDENCE
+LIKELY CONTRIBUTORS
+RECOMMENDED HUMAN REVIEW
+UNCERTAINTIES
+
+Keep the briefing concise and operationally useful.
+
+SUPPLIED EVIDENCE:
+
+{supplied_evidence}
+""".strip()
+
+    def _generate_saas_fallback(
+        self,
+        *,
+        shipment: dict[str, Any],
+        risk: dict[str, Any],
+        weather: dict[str, Any] | None,
+        route_options: list[dict[str, Any]],
+        supplier_options: list[dict[str, Any]],
+        news_results: list[dict[str, Any]],
+        evidence: list[dict[str, Any]],
+        knowledge_results: list[dict[str, Any]],
+    ) -> str:
+        """Generate a transparent deterministic SaaS briefing."""
+
+        shipment_id = shipment.get(
+            "shipment_id",
+            "Unknown",
+        )
+
+        status = shipment.get(
+            "current_status",
+            "Unavailable",
+        ) or "Unavailable"
+
+        destination = shipment.get(
+            "destination",
+            "Unavailable",
+        ) or "Unavailable"
+
+        estimated_arrival = shipment.get(
+            "estimated_arrival"
+        )
+
+        risk_state = risk.get(
+            "state",
+            "monitoring",
+        )
+
+        ml_available = risk.get(
+            "ml_available",
+            False,
+        )
+
+        ml_probability = risk.get(
+            "ml_probability"
+        )
+
+        ml_threshold = risk.get(
+            "ml_threshold"
+        )
+
+        ml_is_at_risk = risk.get(
+            "ml_is_at_risk"
+        )
+
+        evidence_lines: list[str] = [
+            f"- Shipment status: {status}.",
+            f"- Destination: {destination}.",
+            (
+                "- Estimated arrival: "
+                f"{estimated_arrival or 'Unavailable'}."
+            ),
+            f"- Operational risk state: {risk_state}.",
+        ]
+
+        eta_status = self._eta_status(
+            estimated_arrival
+        )
+
+        if eta_status:
+            evidence_lines.append(
+                f"- ETA assessment: {eta_status}"
+            )
+
+        if ml_available and ml_probability is not None:
+            probability_percent = (
+                float(ml_probability) * 100
+            )
+
+            threshold_percent = (
+                float(ml_threshold) * 100
+                if ml_threshold is not None
+                else None
+            )
+
+            evidence_lines.append(
+                "- CatBoost risk probability: "
+                f"{probability_percent:.1f}%."
+            )
+
+            if threshold_percent is not None:
+                evidence_lines.append(
+                    "- CatBoost decision threshold: "
+                    f"{threshold_percent:.1f}%."
+                )
+
+            evidence_lines.append(
+                "- CatBoost classification: "
+                f"{'at risk' if ml_is_at_risk else 'not at risk'}."
+            )
+        else:
+            evidence_lines.append(
+                "- CatBoost prediction: unavailable."
+            )
+
+        evidence_lines.append(
+            "- Weather: "
+            f"{self._format_saas_weather(weather)}"
+        )
+
+        evidence_lines.append(
+            f"- Route alternatives: {len(route_options)}."
+        )
+
+        for route in self._format_saas_routes(
+            route_options
+        ):
+            evidence_lines.append(
+                f"- {route}"
+            )
+
+        evidence_lines.append(
+            f"- Supplier alternatives: {len(supplier_options)}."
+        )
+
+        for supplier in self._format_saas_suppliers(
+            supplier_options
+        ):
+            evidence_lines.append(
+                f"- {supplier}"
+            )
+
+        evidence_lines.append(
+            f"- External news records: {len(news_results)}."
+        )
+
+        for article in self._format_saas_news(
+            news_results
+        ):
+            evidence_lines.append(
+                f"- External news: {article}"
+            )
+
+        evidence_lines.append(
+            f"- Knowledge-base results: "
+            f"{len(knowledge_results)}."
+        )
+
+        formatted_evidence = self._format_saas_evidence(
+            evidence
+        )
+
+        if formatted_evidence:
+            evidence_lines.extend(
+                formatted_evidence
+            )
+
+        has_weather = bool(weather)
+        has_routes = bool(route_options)
+        has_suppliers = bool(supplier_options)
+        has_news = bool(news_results)
+
+        contributor_lines: list[str] = []
+
+        if status.lower() in {
+            "delayed",
+            "late",
+            "exception",
+            "cancelled",
+        }:
+            contributor_lines.append(
+                "The shipment status confirms an operational "
+                "exception."
+            )
+
+        if eta_status == "The estimated arrival time has passed.":
+            contributor_lines.append(
+                "The estimated arrival time has passed."
+            )
+
+        if has_weather:
+            contributor_lines.append(
+                "Weather data is available as contextual evidence, "
+                "but it does not establish weather as the cause."
+            )
+
+        if has_routes:
+            contributor_lines.append(
+                "Alternative road routes were returned by the "
+                "routing service, but route availability does not "
+                "establish the cause of the delay."
+            )
+
+        if has_news:
+            contributor_lines.append(
+                "External news was returned as contextual evidence; "
+                "no shipment-specific causal relationship is assumed."
+            )
+
+        if not contributor_lines:
+            contributor_lines.append(
+                "No confirmed disruption contributor was established "
+                "from the available evidence."
+            )
+
+        if (
+            risk_state == "at_risk"
+            and ml_available
+            and ml_is_at_risk is False
+        ):
+            contributor_lines.append(
+                "The operational risk state and CatBoost classification "
+                "differ: the shipment is operationally delayed, while "
+                "the model probability remains below its decision "
+                "threshold."
+            )
+
+        if risk_state == "at_risk":
+            summary = (
+                f"Shipment {shipment_id} is currently classified as "
+                "at risk based on its operational status and available "
+                "temporal evidence."
+            )
+        else:
+            summary = (
+                f"Shipment {shipment_id} is currently classified as "
+                f"{risk_state} based on the available shipment data."
+            )
+
+        if ml_available and ml_probability is not None:
+            summary += (
+                " CatBoost provides a separate probabilistic estimate "
+                f"of {float(ml_probability) * 100:.1f}%."
+            )
+
+        route_review = (
+            f"{len(route_options)} route alternative(s)"
+            if route_options
+            else "no route alternatives"
+        )
+
+        supplier_review = (
+            f"{len(supplier_options)} supplier alternative(s)"
+            if supplier_options
+            else "no supplier alternatives"
+        )
+
+        return (
+            "EXECUTIVE SUMMARY\n"
+            f"{summary}\n\n"
+            "RISK ASSESSMENT\n"
+            f"Operational risk state: {risk_state}.\n"
+            + (
+                (
+                    f"CatBoost estimates a "
+                    f"{float(ml_probability) * 100:.1f}% probability "
+                    f"of late delivery. "
+                    f"The decision threshold is "
+                    f"{float(ml_threshold) * 100:.1f}%, so the model "
+                    f"classification is "
+                    f"{'at risk' if ml_is_at_risk else 'not at risk'}."
+                )
+                if ml_available
+                and ml_probability is not None
+                and ml_threshold is not None
+                else
+                "CatBoost prediction is unavailable because the "
+                "required model features were not supplied."
+            )
+            + "\n\n"
+            "EVIDENCE\n"
+            + "\n".join(evidence_lines)
+            + "\n\n"
+            "LIKELY CONTRIBUTORS\n"
+            + "\n".join(
+                f"- {line}"
+                for line in contributor_lines
+            )
+            + "\n\n"
+            "RECOMMENDED HUMAN REVIEW\n"
+            f"Review the confirmed shipment status, ETA, model estimate, "
+            f"weather context, route options, and applicable operational "
+            f"procedures. The investigation returned {route_review} and "
+            f"{supplier_review}. These should be verified before any "
+            "operational decision is made. SentinelAI does not "
+            "automatically execute rerouting, carrier changes, or "
+            "supplier changes.\n\n"
+            "UNCERTAINTIES\n"
+            f"Weather evidence is "
+            f"{'available' if has_weather else 'unavailable'}. "
+            f"External news returned {len(news_results)} record(s). "
+            "External evidence may be incomplete or unrelated to the "
+            "specific shipment. The final operational decision remains "
+            "with a human operator."
+        )

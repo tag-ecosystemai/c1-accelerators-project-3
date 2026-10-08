@@ -11,3 +11,7 @@ python-dotenv
 pytest
 httpx
 gunicorn
+SQLAlchemy
+python-multipart
+openpyxl
+chromadb
