@@ -10,6 +10,11 @@ React interface for SentinelAI supply-chain disruption project. This frontend is
 
 - **Operations dashboard:** sample shipment list with search/filter, delay-risk indicators, selected-shipment details, evidence, likely cause, suggested alternative and signal freshness.
 
+- **Data uploads:** separate upload areas in the dashboard for shipment data and RAG knowledge documents.
+  - **Shipment data:** one CSV, XLSX or XLS file for the shipment-analysis pipeline.
+  - **RAG documents:** multiple PDF, DOCX, TXT or MD files for supplier profiles, procedures and reference knowledge.
+  - The frontend validates file formats and lists selected files. Uploading to storage, shipment ingestion and RAG indexing still require separate backend endpoints.
+
 - **Navigation guide:** the chat panel has two modes (You need to create your own API keys on google AI Studio):
   - **Static FAQ** answers common product and navigation questions without an API key.
   - **Gemini 3** sends the conversation to the Gemini API and can answer questions about SentinelAI in context.
