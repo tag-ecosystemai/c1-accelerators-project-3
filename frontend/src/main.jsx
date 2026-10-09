@@ -353,7 +353,7 @@ function App() {
       if (!response.ok) {
         throw new Error(
           payload?.detail ||
-            `Unable to load shipments. HTTP ${response.status}.`,
+          `Unable to load shipments. HTTP ${response.status}.`,
         );
       }
 
@@ -481,7 +481,7 @@ function App() {
       if (!response.ok) {
         throw new Error(
           payload?.detail ||
-            `Shipment import failed. HTTP ${response.status}.`,
+          `Shipment import failed. HTTP ${response.status}.`,
         );
       }
 
@@ -545,7 +545,7 @@ function App() {
       if (!response.ok) {
         throw new Error(
           payload?.detail ||
-            `Knowledge upload failed. HTTP ${response.status}.`,
+          `Knowledge upload failed. HTTP ${response.status}.`,
         );
       }
 
@@ -618,8 +618,7 @@ function App() {
 
       if (riskCounts.atRisk > 0) {
         notify(
-          `${riskCounts.atRisk} shipment${
-            riskCounts.atRisk === 1 ? '' : 's'
+          `${riskCounts.atRisk} shipment${riskCounts.atRisk === 1 ? '' : 's'
           } require${riskCounts.atRisk === 1 ? 's' : ''} human review.`,
         );
       } else {
@@ -658,11 +657,11 @@ function App() {
 
   const signalCount = selected
     ? [
-        selected.signals.weather,
-        selected.signals.knowledge,
-        selected.signals.route,
-        selected.signals.suppliers,
-      ].filter(Boolean).length
+      selected.signals.weather,
+      selected.signals.knowledge,
+      selected.signals.route,
+      selected.signals.suppliers,
+    ].filter(Boolean).length
     : 0;
 
   const alternativeText = buildAlternativeText(selected);
@@ -708,9 +707,8 @@ function App() {
             <button
               key={key}
               onClick={() => handleNav(key)}
-              className={`nav-link ${
-                active === key ? 'selected' : ''
-              }`}
+              className={`nav-link ${active === key ? 'selected' : ''
+                }`}
             >
               <Icon size={18} />
 
@@ -1317,13 +1315,12 @@ function App() {
                         <td>
                           <div className="shipment-cell">
                             <div
-                              className={`supplier-avatar ${
-                                shipment.riskTone === 'high'
-                                  ? 'violet'
-                                  : shipment.riskTone === 'medium'
-                                    ? 'amber'
-                                    : 'green'
-                              }`}
+                              className={`supplier-avatar ${shipment.riskTone === 'high'
+                                ? 'violet'
+                                : shipment.riskTone === 'medium'
+                                  ? 'amber'
+                                  : 'green'
+                                }`}
                             >
                               {shipment.id.slice(-2)}
                             </div>
@@ -1367,13 +1364,12 @@ function App() {
 
                         <td>
                           <span
-                            className={`status-pill ${
-                              shipment.riskTone === 'high'
-                                ? 'status-high'
-                                : shipment.riskTone === 'medium'
-                                  ? 'status-medium'
-                                  : 'status-low'
-                            }`}
+                            className={`status-pill ${shipment.riskTone === 'high'
+                              ? 'status-high'
+                              : shipment.riskTone === 'medium'
+                                ? 'status-medium'
+                                : 'status-low'
+                              }`}
                           >
                             <i />
                             {shipment.status}
@@ -1673,11 +1669,10 @@ function App() {
 
                     <small>
                       {selected?.knowledgeResults?.length
-                        ? `${selected.knowledgeResults.length} relevant source${
-                            selected.knowledgeResults.length === 1
-                              ? ''
-                              : 's'
-                          }`
+                        ? `${selected.knowledgeResults.length} relevant source${selected.knowledgeResults.length === 1
+                          ? ''
+                          : 's'
+                        }`
                         : 'Company procedures available'}
                     </small>
                   </div>
@@ -1703,11 +1698,10 @@ function App() {
 
                     <small>
                       {selected
-                        ? `${selected.routeOptions.length} alternative${
-                            selected.routeOptions.length === 1
-                              ? ''
-                              : 's'
-                          }`
+                        ? `${selected.routeOptions.length} alternative${selected.routeOptions.length === 1
+                          ? ''
+                          : 's'
+                        }`
                         : 'Available for future integration'}
                     </small>
                   </div>
@@ -1799,6 +1793,22 @@ function OperationalBriefing({ shipment }) {
 
   return (
     <div className="operational-briefing">
+      {shipment?.briefing?.trim() && (
+        <section className="ai-generated-briefing">
+          <div className="ai-generated-briefing-header">
+            <Sparkles size={16} />
+            <span>AI-GENERATED ANALYSIS</span>
+          </div>
+
+          <div
+            className="ai-generated-briefing-content"
+            style={{ whiteSpace: 'pre-wrap' }}
+          >
+            {shipment.briefing}
+          </div>
+        </section>
+      )}
+      
       <div className="briefing-summary">
         <div className="briefing-summary-icon">
           <AlertTriangle size={17} />
@@ -1953,8 +1963,8 @@ function OperationalBriefing({ shipment }) {
               <strong>
                 {weather
                   ? `${Number(weather.temperature_c).toFixed(1)}°C · ${Number(
-                      weather.precipitation_mm,
-                    ).toFixed(1)} mm rain`
+                    weather.precipitation_mm,
+                  ).toFixed(1)} mm rain`
                   : 'Unavailable'}
               </strong>
             </div>
@@ -2172,13 +2182,12 @@ function Metric({
         <strong>{value}</strong>
 
         <span
-          className={`metric-delta ${
-            alert
-              ? 'delta-alert'
-              : up
-                ? 'delta-up'
-                : 'delta-down'
-          }`}
+          className={`metric-delta ${alert
+            ? 'delta-alert'
+            : up
+              ? 'delta-up'
+              : 'delta-down'
+            }`}
         >
           {up ? (
             <ArrowUpRight size={13} />

@@ -419,12 +419,13 @@ SUPPLIED EVIDENCE:
                 "Azure OpenAI returned an unexpected response."
             ) from exc
 
+    
+    
     def _generate_with_gemini(self, prompt: str) -> str:
+        print("[SentinelAI] Gemini briefing generation invoked")
+
         api_key = os.getenv("GEMINI_API_KEY")
-        model = os.getenv(
-            "GEMINI_MODEL",
-            "gemini-2.5-flash",
-        )
+        model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
         if not api_key:
             raise RuntimeError(
@@ -435,44 +436,100 @@ SUPPLIED EVIDENCE:
         url = (
             "https://generativelanguage.googleapis.com/v1beta/"
             f"models/{model}:generateContent"
-            f"?key={api_key}"
         )
 
         payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {
-                            "text": prompt,
-                        }
-                    ]
-                }
-            ],
+            "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
                 "temperature": 0.1,
                 "maxOutputTokens": 900,
             },
         }
 
-        response = requests.post(
-            url,
-            headers={
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=60,
-        )
+        retryable_statuses = {429, 500, 502, 503, 504}
+        max_attempts = 3
+        response = None
 
-        response.raise_for_status()
+        for attempt in range(max_attempts):
+            try:
+                response = requests.post(
+                    url,
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-goog-api-key": api_key,
+                    },
+                    json=payload,
+                    timeout=60,
+                )
+            except requests.RequestException as exc:
+                if attempt == max_attempts - 1:
+                    raise RuntimeError(
+                        "Gemini request failed after "
+                        f"{max_attempts} attempts: "
+                        f"{type(exc).__name__}."
+                    ) from None
 
-        data = response.json()
+                delay = 2 ** attempt
+                print(
+                    "[SentinelAI] Gemini network error; "
+                    f"retrying in {delay}s "
+                    f"(attempt {attempt + 1}/{max_attempts})."
+                )
+                time.sleep(delay)
+                continue
+
+            if response.ok:
+                break
+
+            try:
+                message = (
+                    response.json()
+                    .get("error", {})
+                    .get("message", "Unknown API error")
+                )
+            except (ValueError, AttributeError):
+                message = "Google returned an invalid error response."
+
+            if (
+                response.status_code not in retryable_statuses
+                or attempt == max_attempts - 1
+            ):
+                raise RuntimeError(
+                    f"Gemini API returned HTTP "
+                    f"{response.status_code}: {message}"
+                )
+
+            delay = 2 ** attempt
+            print(
+                f"[SentinelAI] Gemini HTTP {response.status_code}; "
+                f"retrying in {delay}s "
+                f"(attempt {attempt + 1}/{max_attempts})."
+            )
+            time.sleep(delay)
+
+        if response is None or not response.ok:
+            raise RuntimeError(
+                "Gemini request failed without a successful response."
+            )
 
         try:
-            return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-        except (KeyError, IndexError, TypeError) as exc:
+            data = response.json()
+            text = "".join(
+                part.get("text", "")
+                for part in data["candidates"][0]["content"]["parts"]
+                if isinstance(part, dict)
+            ).strip()
+        except (KeyError, IndexError, TypeError, ValueError):
             raise RuntimeError(
                 "Gemini returned an unexpected response."
-            ) from exc
+            ) from None
+
+        if not text:
+            raise RuntimeError("Gemini returned an empty response.")
+
+        return text
+
+
 
     @staticmethod
     def _format_saas_weather(
