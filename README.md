@@ -1,5 +1,11 @@
 # SentinelAI
 ### AI-Powered Supply Chain Disruption Intelligence
+This repository contains Team Accelerators' work for Project 3 of the TAG AI Engineering Bootcamp.
+
+Team Members:
+Yifieyeh Achesomie Goni
+SOULEY Raquib
+Tomoloju Temilolaoluwa
 
 SentinelAI is an AI-powered supply chain intelligence platform that helps logistics teams identify shipment disruptions, assess operational risks, investigate contributing factors, and make evidence-based decisions.
 
