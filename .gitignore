@@ -35,6 +35,9 @@ data/processed/*
 !data/processed/.gitkeep
 !data/processed/routes.json
 !data/processed/suppliers.json
+!data/processed/shipment_features.csv
+data/sentinel.db
+data/chroma/
 
 # IDE / OS
 .vscode/
@@ -48,3 +51,6 @@ Thumbs.db
 # Coverage
 .coverage
 htmlcov/
+
+# Temporary local DataCo source
+/DataCoSupplyChainDataset.csv
